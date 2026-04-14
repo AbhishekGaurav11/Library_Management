@@ -3,7 +3,7 @@ node_modules/
 package-lock.json
 yarn.lock
 
-# Environment variables
+# Environment variables (NEVER commit these!)
 .env
 .env.local
 .env.*.local
@@ -32,3 +32,6 @@ build/
 
 # Database (optional - if you want to exclude local DB backups)
 *.sql
+
+# Render
+.render/

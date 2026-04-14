@@ -1,0 +1,32 @@
+services:
+  - type: web
+    name: biblio-backend
+    env: node
+    region: oregon
+    plan: free
+    buildCommand: cd backend && npm install
+    startCommand: cd backend && npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DB_HOST
+        fromDatabase:
+          name: biblio-db
+          property: host
+      - key: DB_USER
+        fromDatabase:
+          name: biblio-db
+          property: username
+      - key: DB_PASSWORD
+        fromDatabase:
+          name: biblio-db
+          property: password
+      - key: DB_NAME
+        value: biblio
+
+databases:
+  - name: biblio-db
+    databaseName: biblio
+    user: postgres
+    plan: free
+    region: oregon

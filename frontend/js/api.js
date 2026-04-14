@@ -1,4 +1,17 @@
-const BASE_URL = "http://127.0.0.1:5000/api";
+// Dynamically determine API base URL
+const BASE_URL = (() => {
+  if (typeof window !== 'undefined') {
+    // Browser environment
+    const isDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    if (isDev) {
+      return window.location.protocol + '//' + window.location.hostname + ':5000/api';
+    } else {
+      // Production: use same origin as frontend
+      return window.location.origin + '/api';
+    }
+  }
+  return '/api'; // Fallback
+})();
 
 // ─── Books ────────────────────────────────────────────────────────────────────
 export async function getBooks() {
