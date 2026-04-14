@@ -9,9 +9,9 @@ exports.getTransactions = (req, res) => {
   });
 };
 
-// Calculate late fine
+// Calculate late fine (₹30 per day)
 function calculateFine(dueDate, returnDate) {
-  const FINE_PER_DAY = 2; // $2 per day late
+  const FINE_PER_DAY = 30; // ₹30 per day late
   const due = new Date(dueDate);
   const returned = new Date(returnDate);
   
@@ -82,17 +82,21 @@ exports.returnBook = (req, res) => {
 
 // Pay fine
 exports.payFine = (req, res) => {
-  const { id } = req.body;
+  const { id, paymentMethod } = req.body;
 
   if (!id) {
     return res.status(400).json({ error: "Transaction ID is required" });
   }
 
-  transactionModel.payFine(id, (err) => {
+  if (!paymentMethod) {
+    return res.status(400).json({ error: "Payment method is required" });
+  }
+
+  transactionModel.payFine(id, paymentMethod, (err) => {
     if (err) {
       console.error("Error paying fine:", err);
       return res.status(500).json({ error: err.message });
     }
-    res.json({ message: "Fine payment recorded successfully" });
+    res.json({ message: "Fine payment recorded successfully", paymentMethod });
   });
 };

@@ -26,12 +26,12 @@ exports.returnBook = (id, returnDate, fineAmount, callback) => {
   db.query(sql, [returnDate, fineAmount, id], callback);
 };
 
-exports.payFine = (id, callback) => {
+exports.payFine = (id, paymentMethod, callback) => {
   const sql = `
     UPDATE transactions 
-    SET fine_paid = true
+    SET fine_paid = true, payment_method = ?, payment_date = NOW()
     WHERE id = ?
   `;
 
-  db.query(sql, [id], callback);
+  db.query(sql, [paymentMethod, id], callback);
 };

@@ -1,8 +1,8 @@
-import { getBooks, addBookAPI, deleteBookAPI, addCopiesAPI } from "./api.js";
+import { getBooks, addBookAPI, deleteBookAPI, addCopiesAPI, borrowBookAPI, returnBookAPI } from "./api.js";
 
 // ─── State ────────────────────────────────────────────────────────────────────
 let books = [];
-let pendingBookId = null;   // for delete / add-copies / borrow / return
+let pendingBookId = null;
 
 // ─── Genre styling map ────────────────────────────────────────────────────────
 const GENRE_STYLES = {
@@ -24,7 +24,7 @@ window.loadBooks = async function () {
     showToast("Could not load books from server", "error");
     books = [];
   }
-  window._books = books;  // Make books available globally for transactions display
+  window._books = books;
   renderBooks();
   updateDashboard();
 };
@@ -55,23 +55,19 @@ window.renderBooks = function () {
   }
 
   grid.innerHTML = filtered.map(b => {
-    const gs       = genreStyle(b.genre);
-    const avail    = Number(b.available);
-    const copies   = Number(b.copies);
-    const pct      = copies > 0 ? Math.round((avail / copies) * 100) : 0;
-    const allOut   = avail <= 0;
+    const gs     = genreStyle(b.genre);
+    const avail  = Number(b.available);
+    const copies = Number(b.copies);
+    const pct    = copies > 0 ? Math.round((avail / copies) * 100) : 0;
+    const allOut = avail <= 0;
 
-    let actionBtn;
-    if (allOut) {
-      actionBtn = `<button class="btn-out" disabled>All Copies Out</button>`;
-    } else {
-      actionBtn = `<button class="btn-borrow" onclick="openBorrow(${b.id})">Borrow</button>`;
-    }
+    const actionBtn = allOut
+      ? `<button class="btn-out" disabled>All Copies Out</button>`
+      : `<button class="btn-borrow" onclick="openBorrow(${b.id})">Borrow</button>`;
 
-    // Check if any active transaction for this book exists (for return button)
-    const hasActive = window._transactions
-      ? window._transactions.some(t => String(t.book_id) === String(b.id) && !t.returned)
-      : false;
+    const hasActive = (window._transactions || []).some(
+      t => String(t.book_id) === String(b.id) && !(t.returned === true || t.returned === 1 || t.returned === "1")
+    );
     const returnBtn = hasActive
       ? `<button class="btn-return" onclick="openReturn(${b.id})">Return</button>`
       : `<button class="btn-out" disabled style="flex:0.6">Return</button>`;
@@ -202,29 +198,26 @@ window.confirmAddCopies = async function () {
 // ─── Borrow ───────────────────────────────────────────────────────────────────
 window.openBorrow = function (bookId) {
   pendingBookId = bookId;
-  const book    = books.find(b => b.id == bookId);
+  const book = books.find(b => b.id == bookId);
+
   const titleEl = document.getElementById("borrow-title");
   if (titleEl && book) titleEl.textContent = `Borrow — ${book.title}`;
 
-  // Set default due date to 14 days from now
-  const defaultDueDate = daysFromNow(14);
+  // Set default due date to 14 days from today
   const dueDateInput = document.getElementById("borrow-due-date");
   if (dueDateInput) {
-    dueDateInput.value = defaultDueDate;
-    dueDateInput.min = today(); // Can't set due date in the past
+    dueDateInput.value = daysFromNow(14);
+    dueDateInput.min   = daysFromNow(1);   // can't set due date in the past
   }
 
   const infoEl = document.getElementById("borrow-info");
-  if (infoEl) {
-    const due = new Date(defaultDueDate).toLocaleDateString("en-IN", { day:"numeric", month:"short", year:"numeric" });
-    infoEl.textContent = `Select a due date. Default is 14 days from now (${due}).`;
-  }
+  if (infoEl) infoEl.textContent = "Default loan period is 14 days. You can adjust the due date above.";
 
-  // Populate member dropdown
+  // Populate member dropdown (active members only)
   const sel = document.getElementById("borrow-member");
   sel.innerHTML = `<option value="">— Choose a member —</option>`;
   (window._members || [])
-    .filter(m => m.active || m.active == 1)
+    .filter(m => m.active === true || m.active === 1 || m.active === "1")
     .forEach(m => {
       const opt = document.createElement("option");
       opt.value = m.id;
@@ -237,17 +230,19 @@ window.openBorrow = function (bookId) {
 
 window.confirmBorrow = async function () {
   const memberId = document.getElementById("borrow-member").value;
-  const dueDate = document.getElementById("borrow-due-date").value;
-  
+  const dueDate  = document.getElementById("borrow-due-date")?.value;
+
   if (!memberId) { showToast("Please select a member", "error"); return; }
-  if (!dueDate) { showToast("Please set a due date", "error"); return; }
+  if (!dueDate)  { showToast("Please set a due date", "error"); return; }
+  if (dueDate <= today()) { showToast("Due date must be in the future", "error"); return; }
   if (!pendingBookId) return;
 
   const tx = {
-    bookId:   pendingBookId,
-    memberId: memberId,
-    date:     today(),
-    dueDate:  dueDate,
+    id:        "T" + Date.now(),
+    book_id:   pendingBookId,
+    member_id: memberId,
+    date:      today(),
+    due_date:  dueDate,
   };
 
   try {
@@ -266,13 +261,15 @@ window.confirmBorrow = async function () {
 // ─── Return ───────────────────────────────────────────────────────────────────
 window.openReturn = function (bookId) {
   pendingBookId = bookId;
-  const book    = books.find(b => b.id == bookId);
+  const book = books.find(b => b.id == bookId);
+
   const titleEl = document.getElementById("return-title");
   if (titleEl && book) titleEl.textContent = `Return — ${book.title}`;
 
-  // Find active transactions for this book and populate borrowers
+  // Find active transactions for this book and list borrowers
   const activeTxs = (window._transactions || []).filter(
-    t => String(t.book_id) === String(bookId) && !t.returned
+    t => String(t.book_id) === String(bookId) &&
+         !(t.returned === true || t.returned === 1 || t.returned === "1")
   );
 
   const sel = document.getElementById("return-member");
@@ -280,7 +277,7 @@ window.openReturn = function (bookId) {
   activeTxs.forEach(t => {
     const member = (window._members || []).find(m => String(m.id) === String(t.member_id));
     const opt    = document.createElement("option");
-    opt.value    = t.id;           // transaction ID
+    opt.value    = t.id;    // transaction ID used to mark return
     opt.textContent = member ? member.name : `Member ${t.member_id}`;
     sel.appendChild(opt);
   });
@@ -293,11 +290,7 @@ window.confirmReturn = async function () {
   if (!txId) { showToast("Please select who is returning", "error"); return; }
 
   try {
-    // Get the transaction to retrieve the dueDate
-    const tx = (window._transactions || []).find(t => String(t.id) === String(txId));
-    const dueDate = tx ? tx.due_date : new Date().toISOString().slice(0, 10);
-    
-    await returnBookAPI({ id: txId, bookId: pendingBookId, dueDate });
+    await returnBookAPI({ id: txId, bookId: pendingBookId });
     closeModal("return-modal");
     const book = books.find(b => b.id == pendingBookId);
     showToast(`"${book?.title}" returned successfully ✓`, "success");
@@ -309,41 +302,50 @@ window.confirmReturn = async function () {
   }
 };
 
-// ─── Dashboard helpers ────────────────────────────────────────────────────────
+// ─── Dashboard ────────────────────────────────────────────────────────────────
 window.updateDashboard = function () {
-  const total    = books.reduce((s, b) => s + Number(b.copies), 0);
-  const avail    = books.reduce((s, b) => s + Number(b.available), 0);
-  const loaned   = total - avail;
+  const total  = books.reduce((s, b) => s + Number(b.copies), 0);
+  const avail  = books.reduce((s, b) => s + Number(b.available), 0);
+  const loaned = total - avail;
 
-  const txs      = window._transactions || [];
-  const members  = window._members || [];
-  const today_   = today();
-  const overdue  = txs.filter(t => !t.returned && t.due_date < today_).length;
-  
-  // Calculate new stats
-  const activeMembers = members.filter(m => m.active || m.active == 1).length;
-  const totalFines = txs.reduce((sum, t) => sum + (Number(t.fine_paid) ? 0 : Number(t.fine_amount || 0)), 0);
-  const genres = new Set(books.map(b => b.genre)).size;
-  const totalTransactions = txs.length;
+  const txs     = window._transactions || [];
+  const today_  = today();
+  const overdue = txs.filter(
+    t => !(t.returned === true || t.returned === 1 || t.returned === "1") &&
+         t.due_date && t.due_date < today_
+  ).length;
 
-  setText("stat-total",   total);
-  setText("stat-titles",  `${books.length} unique title${books.length !== 1 ? "s" : ""}`);
-  setText("stat-avail",   avail);
-  setText("stat-loans",   loaned);
-  setText("stat-overdue", overdue);
-  setText("stat-overdue-sub", overdue > 0 ? `${overdue} item${overdue > 1 ? "s" : ""} past due date` : "all loans on time");
-  
-  // New stats
-  setText("stat-members", activeMembers);
-  setText("stat-fines", `$${totalFines.toFixed(2)}`);
-  setText("stat-genres", genres);
-  setText("stat-transactions", totalTransactions);
+  // Total fines collected (paid only)
+  const totalFines = txs
+    .filter(t => t.fine_paid === true || t.fine_paid === 1 || t.fine_paid === "1")
+    .reduce((s, t) => s + (parseFloat(t.fine_amount) || 0), 0);
+
+  // Unique genres
+  const genres = new Set(books.map(b => b.genre).filter(Boolean));
+
+  // Active members
+  const activeMembers = (window._members || []).filter(
+    m => m.active === true || m.active === 1 || m.active === "1"
+  ).length;
+
+  setText("stat-total",        total);
+  setText("stat-titles",       `${books.length} unique title${books.length !== 1 ? "s" : ""}`);
+  setText("stat-avail",        avail);
+  setText("stat-loans",        loaned);
+  setText("stat-overdue",      overdue);
+  setText("stat-overdue-sub",  overdue > 0 ? `${overdue} item${overdue > 1 ? "s" : ""} past due` : "all loans on time");
+  setText("stat-members",      activeMembers);
+  setText("stat-fines",        `₹${totalFines.toFixed(2)}`);
+  setText("stat-genres",       genres.size);
+  setText("stat-transactions", txs.length);
+
+  const dateEl = document.getElementById("dash-date");
+  if (dateEl) dateEl.textContent = new Date().toLocaleDateString("en-IN", {
+    weekday: "long", day: "numeric", month: "long", year: "numeric"
+  });
 
   renderGenreBars();
   renderActivity();
-
-  const dateEl = document.getElementById("dash-date");
-  if (dateEl) dateEl.textContent = new Date().toLocaleDateString("en-IN", { weekday:"long", day:"numeric", month:"long", year:"numeric" });
 };
 
 function renderGenreBars() {
@@ -353,7 +355,7 @@ function renderGenreBars() {
   const counts = {};
   books.forEach(b => { counts[b.genre] = (counts[b.genre] || 0) + Number(b.copies); });
   const max    = Math.max(...Object.values(counts), 1);
-  const colors = { "Sci-Fi":"#818cf8", "Fantasy":"#a78bfa", "Classic":"#fbbf24", "Non-Fiction":"#34d399" };
+  const colors = { "Sci-Fi": "#818cf8", "Fantasy": "#a78bfa", "Classic": "#fbbf24", "Non-Fiction": "#34d399" };
 
   container.innerHTML = Object.entries(counts)
     .sort((a, b) => b[1] - a[1])
@@ -364,7 +366,7 @@ function renderGenreBars() {
           <span>${count} cop${count !== 1 ? "ies" : "y"}</span>
         </div>
         <div class="bar-track">
-          <div class="bar-fill" style="width:${Math.round((count/max)*100)}%;background:${colors[genre]||"#6b7280"}"></div>
+          <div class="bar-fill" style="width:${Math.round((count / max) * 100)}%;background:${colors[genre] || "#6b7280"}"></div>
         </div>
       </div>`)
     .join("");
@@ -386,7 +388,7 @@ function renderActivity() {
   container.innerHTML = txs.map(t => {
     const book   = books.find(b => String(b.id) === String(t.book_id));
     const member = (window._members || []).find(m => String(m.id) === String(t.member_id));
-    const isRet  = t.returned;
+    const isRet  = t.returned === true || t.returned === 1 || t.returned === "1";
     const color  = isRet ? "var(--green)" : "var(--yellow)";
     const label  = isRet ? "Returned" : "Borrowed";
     const date   = formatDate(t.return_date || t.date);
@@ -403,14 +405,11 @@ function renderActivity() {
   }).join("");
 }
 
-// ─── Shared data setters ──────────────────────────────────────────────────────
-window._books = books;
-
 // ─── Utility ──────────────────────────────────────────────────────────────────
 function escHtml(str) {
   return String(str ?? "")
-    .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
-    .replace(/"/g,"&quot;").replace(/'/g,"&#39;");
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }
 
 function today() {
@@ -423,12 +422,10 @@ function daysFromNow(n) {
 
 function formatDate(d) {
   if (!d) return "—";
-  return new Date(d).toLocaleDateString("en-IN", { day:"numeric", month:"short" });
+  return new Date(d).toLocaleDateString("en-IN", { day: "numeric", month: "short" });
 }
 
 function setText(id, val) {
   const el = document.getElementById(id);
   if (el) el.textContent = val;
 }
-
-import { borrowBookAPI, returnBookAPI } from "./api.js";

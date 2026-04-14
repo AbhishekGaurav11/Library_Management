@@ -271,7 +271,14 @@
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="12 8 12 12 14 14"/><path d="M3.05 11a9 9 0 1 1 .5 4m-.5 5v-5h5"/></svg>
       Transactions
     </button>
-    <div class="sidebar-footer">v2.4.1 · Connected</div>
+    
+    <!-- Logout Button -->
+    <button class="nav-btn" style="margin-top: auto; color: var(--red); border-top: 1px solid var(--border); padding-top: 16px; margin-bottom: 0;" onclick="logout()">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+      Logout
+    </button>
+    
+    <div class="sidebar-footer" id="admin-info">v2.4.1 · Connected</div>
   </div>
 
   <!-- Main -->
@@ -323,7 +330,7 @@
         <div class="stat-card teal">
           <div class="stat-icon">💰</div>
           <div class="label">Total Fines</div>
-          <div class="value" id="stat-fines">$0</div>
+          <div class="value" id="stat-fines">₹0</div>
           <div class="sub">collected</div>
         </div>
         <div class="stat-card pink">
@@ -578,6 +585,51 @@
       document.querySelectorAll(".modal-overlay").forEach(m => m.style.display = "none");
     }
   });
+
+  // Authentication functions
+  const BASE_URL = (() => {
+    const isDev = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    return isDev ? `${window.location.protocol}//${window.location.hostname}:5000/api` : 
+                   `${window.location.origin}/api`;
+  })();
+
+  window.logout = async function() {
+    try {
+      await fetch(`${BASE_URL}/auth/logout`, {
+        method: 'POST',
+        credentials: 'include'
+      });
+    } catch (error) {
+      console.log('Logout error:', error);
+    }
+    window.location.href = '/login.html';
+  };
+
+  // Check authentication on page load
+  async function checkAuthentication() {
+    try {
+      const response = await fetch(`${BASE_URL}/auth/current`, {
+        method: 'GET',
+        credentials: 'include'
+      });
+
+      if (!response.ok) {
+        // Not authenticated, redirect to login
+        window.location.href = '/login.html';
+        return false;
+      }
+
+      const data = await response.json();
+      if (data.admin) {
+        document.getElementById('admin-info').textContent = `Admin: ${data.admin.username}`;
+      }
+      return true;
+    } catch (error) {
+      console.log('Auth check error:', error);
+      window.location.href = '/login.html';
+      return false;
+    }
+  }
 </script>
 
 <script type="module">
@@ -586,6 +638,10 @@
   import "./js/transactions.js";
 
   window.addEventListener("DOMContentLoaded", async () => {
+    // Check authentication first
+    const isAuthenticated = await checkAuthentication();
+    if (!isAuthenticated) return;
+
     // Load in sequence: books first, then members, then transactions
     if (window.loadBooks)        await window.loadBooks();
     if (window.loadMembers)      await window.loadMembers();
